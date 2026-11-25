@@ -44,6 +44,26 @@ created on first run — add your own API keys in Settings.
   descriptions)
 - `logo.webp` — the app logo
 
+## Acknowledgements
+
+Athena AI Agent is modeled on **Odysseus AI**, the self-hosted AI
+workspace it was built to match. The basics come from Odysseus:
+
+- **Chat** — talk to many AI models through endpoints you add yourself.
+- **Agent** — the model works, not just answers: it writes files, runs
+  shell commands, searches the web, makes PDFs and spreadsheets, and
+  shows each step as it goes.
+- **Skills** — reusable instructions that teach the agent how to do a
+  specific job.
+- **Memory** — it remembers things about you and your work, so you do
+  not repeat yourself.
+- **Workspace** — a folder where the agent reads and writes files.
+- **Deep Research and Cookbook** — research that plans, searches and
+  writes a sourced report; a model manager for finding and running
+  models on your own machine.
+
+That is the foundation Athena AI Agent builds on.
+
 ## Note
 
 This is a personal project. The agent runs shell commands on your
