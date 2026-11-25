@@ -1,0 +1,10 @@
+/target/
+*.log
+*.bak-*
+*.bak
+chats/
+pdfs/
+notes/
+*.json
+!Cargo.lock
+.DS_Store
