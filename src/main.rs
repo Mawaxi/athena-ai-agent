@@ -1509,6 +1509,12 @@ struct WsFileContent {
     content: String,
 }
 
+#[derive(Deserialize)]
+struct WsFileSave {
+    path: String,
+    content: String,
+}
+
 /// Provider presets for the Add Endpoint form: picking one fills in the
 /// base URL and model, so the user only types the API key. "custom" is
 /// blank on purpose. No Shannon preset: its base URL is not verified.
@@ -2756,6 +2762,7 @@ async fn browser_fetch(
 // keeps the colours and graphics; the plain server writer is not used
 // for research reports.
 const PDFS_DIR: &str = "pdfs";
+const WALLPAPERS_DIR: &str = "wallpapers";
 const PDF_INDEX_FILE: &str = "pdfs.json";
 const MAX_PDF_BYTES: usize = 20 * 1024 * 1024;
 
@@ -3797,6 +3804,29 @@ async fn serve_pdf_file(
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/pdf"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("inline"),
+    );
+    Ok((headers, bytes))
+}
+
+// Serve one of the built-in HD chat wallpapers (wallpapers/<name>.jpg).
+// Only the four known names are served, so no path can escape the folder.
+async fn serve_wallpaper(
+    Path(name): Path<String>,
+) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
+    const ALLOWED: [&str; 4] = ["mountains", "nebula", "ocean", "forest"];
+    if !ALLOWED.contains(&name.as_str()) {
+        return Err((StatusCode::NOT_FOUND, "wallpaper not found".into()));
+    }
+    let path = PathBuf::from(WALLPAPERS_DIR).join(format!("{name}.jpg"));
+    let bytes = fs::read(&path).map_err(|_| (StatusCode::NOT_FOUND, "wallpaper not found".into()))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("image/jpeg"),
     );
     headers.insert(
         header::CONTENT_DISPOSITION,
@@ -5477,6 +5507,38 @@ async fn read_workspace_file(
     Ok(Json(WsFileContent { path: rel, content }))
 }
 
+// Save an edited file from the editor panel. Same containment rules as
+// the read preview: the path must resolve inside the workspace.
+async fn write_workspace_file(
+    Json(body): Json<WsFileSave>,
+) -> Result<Json<WsFileContent>, (StatusCode, String)> {
+    if body.content.len() > 200_000 {
+        return Err((StatusCode::BAD_REQUEST, "file too large to save".into()));
+    }
+    let rel = body.path.clone();
+    let p = ws_path(&rel).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let root = ws_root();
+    let canon_root = fs::canonicalize(&root).unwrap_or(root);
+    let parent = p
+        .parent()
+        .map(|d| d.to_path_buf())
+        .unwrap_or_else(|| canon_root.clone());
+    let canon_parent = fs::canonicalize(&parent).unwrap_or(parent);
+    if !canon_parent.starts_with(&canon_root) {
+        return Err((StatusCode::FORBIDDEN, "outside workspace".into()));
+    }
+    let name = p
+        .file_name()
+        .ok_or((StatusCode::BAD_REQUEST, "bad path".to_string()))?;
+    let dest = canon_parent.join(name);
+    if let Some(d) = dest.parent() {
+        let _ = fs::create_dir_all(d);
+    }
+    fs::write(&dest, &body.content)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(WsFileContent { path: rel, content: body.content }))
+}
+
 fn extract_stream_content(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -7143,6 +7205,7 @@ struct WsEntry {
     path: String,
     is_dir: bool,
     size: u64,
+    mtime: u64,
 }
 
 async fn list_workspace() -> Json<Vec<WsEntry>> {
@@ -7162,8 +7225,10 @@ async fn list_workspace() -> Json<Vec<WsEntry>> {
                     .to_string_lossy()
                     .to_string();
                 let is_dir = p.is_dir();
-                let size = if is_dir { 0 } else { e.metadata().map(|m| m.len()).unwrap_or(0) };
-                out.push(WsEntry { path: rel, is_dir, size });
+                let md = e.metadata().ok();
+                let size = if is_dir { 0 } else { md.as_ref().map(|m| m.len()).unwrap_or(0) };
+                let mtime = md.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                out.push(WsEntry { path: rel, is_dir, size, mtime });
                 if is_dir {
                     walk(&p, base, depth + 1, out);
                 }
@@ -7238,6 +7303,7 @@ async fn main() {
         .route("/api/pdf/upload", post(upload_pdf))
         .route("/api/pdf/list", get(list_pdfs))
         .route("/api/pdf/file/:id", get(serve_pdf_file))
+        .route("/wallpapers/:name", get(serve_wallpaper))
         .route("/api/pdf/text/:id", get(pdf_text))
         .route("/api/pdf/edit", post(edit_pdf))
         .route("/api/pdf/:id", delete(delete_pdf))
@@ -7263,7 +7329,7 @@ async fn main() {
             "/api/research/history/:id/download",
             get(download_research_history_entry),
         )
-        .route("/api/workspace/file", get(read_workspace_file))
+        .route("/api/workspace/file", get(read_workspace_file).put(write_workspace_file))
         // PDF upload sends the file as base64 inside JSON, so the
         // body limit must cover a 20 MB PDF (MAX_PDF_BYTES) plus
         // base64 overhead (~33%). Axum defaults JSON bodies to
@@ -7779,6 +7845,9 @@ mod tests {
         assert!(INDEX_HTML.contains("Instagram"));
         assert!(INDEX_HTML.contains("Sunset"));
         assert!(INDEX_HTML.contains("Lavender"));
+        assert!(INDEX_HTML.contains("Glass Dark"));
+        assert!(INDEX_HTML.contains("Glass Green"));
+        assert!(INDEX_HTML.contains("Glass Light"));
         // Chat text size + zoom: size picker in Settings, zoom buttons in header.
         assert!(INDEX_HTML.contains("mawaxi-chat-font-size"));
         assert!(INDEX_HTML.contains("id=\"fontSizeRow\""));
@@ -8503,6 +8572,7 @@ body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);mar
 .chatitem .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
 .chatitem .d{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chatitem .del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px}
+.chatitem .ren{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:none}
 #overlay.show{display:block}
 #closeSide{display:none}
@@ -8542,6 +8612,9 @@ header .title .chev{color:var(--green);font-size:14px}
 #empty .tagline{color:var(--muted);font-size:17px;margin-top:2px}
 #personaBtn{pointer-events:auto;display:inline-flex;align-items:center;gap:6px;margin-top:14px;padding:7px 16px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--muted);font-size:14px;cursor:pointer}
 #personaBtn:hover{border-color:var(--green);color:var(--text)}
+#modeToggleWelcome{margin:12px auto 0;display:flex;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:3px;width:max-content;pointer-events:auto}
+#modeToggleWelcome button{background:none;border:none;color:var(--muted);font-size:14px;padding:6px 16px;border-radius:999px;cursor:pointer}
+#modeToggleWelcome button.active{background:var(--hover);color:var(--text)}
 #composer{margin:0 12px 14px;background:var(--panel2);border:1px solid var(--border);border-radius:22px;padding:10px 12px 8px}
 .input-row{display:flex;align-items:center;gap:8px}
 #q{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--text);font-size:16px;padding:6px 4px;font-family:inherit}
@@ -8553,9 +8626,6 @@ header .title .chev{color:var(--green);font-size:14px}
 .action-row{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
 .iconbtn{background:none;border:none;cursor:pointer;padding:8px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted)}
 .iconbtn:hover{background:var(--hover);color:var(--text)}
-#modeToggle{margin:0 auto;display:flex;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:3px}
-#modeToggle button{background:none;border:none;color:var(--muted);font-size:14px;padding:6px 16px;border-radius:999px;cursor:pointer}
-#modeToggle button.active{background:var(--hover);color:var(--text)}
 #micBtn{background:var(--green);border:none;width:44px;height:44px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 #micBtn:hover{background:var(--green-hover)}
 #sendBtn{background:var(--panel);border:1px solid var(--border);width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -8724,6 +8794,43 @@ textarea.fld{resize:vertical}
 .wsrow{display:flex;justify-content:space-between;gap:8px;padding:4px 0;white-space:nowrap;overflow:hidden}
 .wsrow .nm{overflow:hidden;text-overflow:ellipsis}
 .wsrow .sz{color:var(--muted);flex-shrink:0}
+#editorPanel{position:fixed;top:0;right:0;bottom:0;width:min(560px,92vw);background:var(--panel);border-left:1px solid var(--border);z-index:60;display:flex;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.35)}
+#editorPanel .edHead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px}
+#editorPanel .edTitle{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#editorPanel .edStatus{font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
+#editorPanel .edPath{padding:6px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#editorBody{flex:1;width:100%;border:none;outline:none;resize:none;background:var(--bg);color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.55;padding:12px}
+@media (max-width:900px){#editorPanel{width:100vw;border-left:none}}
+.libGallery{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.libToolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.libTbLabel{font-size:12px;color:var(--muted);font-weight:600}
+.libViewBtn{padding:5px 9px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--muted);font-size:12px;cursor:pointer}
+.libViewBtn.active{background:var(--green);color:#fff;border-color:var(--green);font-weight:600}
+.libSortSel{padding:5px 6px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);font-size:12px}
+#libWs.view-medium .libGallery,#libImgs.view-medium{grid-template-columns:repeat(4,1fr)}
+#libWs.view-medium .libTileIcon,#libImgs.view-medium .libTileIcon{font-size:16px}
+#libWs.view-small .libGallery,#libImgs.view-small{grid-template-columns:repeat(6,1fr)}
+#libWs.view-small .libTileIcon,#libImgs.view-small .libTileIcon{font-size:11px}
+#libWs.view-small .libTileCap,#libImgs.view-small .libTileCap{font-size:10px;padding:3px 4px}
+#libWs.view-list .libGallery,#libImgs.view-list{grid-template-columns:1fr}
+#libWs.view-list .libTile,#libImgs.view-list .libTile{flex-direction:row;align-items:center;text-align:left}
+#libWs.view-list .libTileIcon,#libImgs.view-list .libTileIcon{width:64px;flex-shrink:0;aspect-ratio:auto;height:44px;font-size:12px}
+#libWs.view-list .libTile img,#libImgs.view-list .libTile img{width:64px;height:44px;aspect-ratio:auto;flex-shrink:0}
+#libWs.view-list .libTileCap,#libImgs.view-list .libTileCap{-webkit-line-clamp:1;padding:6px 10px}
+.libTile{padding:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel2);cursor:pointer;display:flex;flex-direction:column;text-align:center}
+.libTile img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block}
+.libTilePlaceholder{background:var(--panel2);border-style:dashed}
+.libTileCap{padding:6px 8px;font-size:12px;line-height:1.35;color:var(--text);word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.libTileIcon{width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:#fff;letter-spacing:.5px}
+.libTabs{display:flex;gap:6px;margin:10px 0 4px}
+.libTab{flex:1;padding:8px 4px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--muted);font-size:14px;cursor:pointer}
+.libTab.active{background:var(--green);color:#fff;border-color:var(--green);font-weight:600}
+.libGroup{font-weight:700;font-size:12px;color:var(--muted);margin:16px 0 4px;text-transform:uppercase;letter-spacing:.5px}
+.libPanel{margin-top:6px}
+#libLightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:80;display:none;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+#libLightbox img{max-width:100%;max-height:82vh;object-fit:contain;border-radius:10px}
+#libLbClose{position:absolute;top:12px;right:12px}
+#libLbCap{color:#fff;font-size:13px;margin-top:10px;max-width:90vw;text-align:center;white-space:pre-wrap;word-break:break-word}
 /* Themes, Browser, Calendar, PDF, Data Saver */
 .themegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .themebtn{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 12px;font-size:14px;cursor:pointer;text-align:left}
@@ -8836,11 +8943,20 @@ textarea.fld{resize:vertical}
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span id="personaBtnLabel">General</span>
         </button>
+        <div id="modeToggleWelcome">
+          <button type="button" id="modeAgentW">Agent</button>
+          <button type="button" id="modeChatW" class="active">Chat</button>
+        </div>
       </div>
     </div>
     <div id="wsPanel" style="display:none">
       <div class="wsHead"><span>Workspace</span><span id="wsPathLabel" class="wsPathLabel"></span><button id="wsRefresh" class="mini" type="button">Refresh</button><button id="wsPanelClose" class="iconbtn" type="button" title="Close">&#10005;</button></div>
       <div id="wsList"></div>
+    </div>
+    <div id="editorPanel" style="display:none">
+      <div class="edHead"><span id="editorTitle" class="edTitle">Editor</span><span id="editorStatus" class="edStatus"></span><button id="editorSave" class="mini" type="button" title="Save file">Save</button><button id="editorClose" class="iconbtn" type="button" title="Close editor">&#10005;</button></div>
+      <div id="editorPath" class="edPath"></div>
+      <textarea id="editorBody" spellcheck="false" placeholder="File content"></textarea>
     </div>
     <form id="f">
       <div id="composer">
@@ -8863,10 +8979,6 @@ textarea.fld{resize:vertical}
           <button type="button" id="vidBtn" class="iconbtn" title="Generate video">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 10l5-3v10l-5-3"/></svg>
           </button>
-          <div id="modeToggle">
-            <button type="button" id="modeAgent">Agent</button>
-            <button type="button" id="modeChat" class="active">Chat</button>
-          </div>
           <button type="button" id="stopAgentBtn" style="display:none">Stop</button>
           <button type="button" id="micBtn" title="Voice input" aria-label="Voice input">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V23h2v-3.06A9 9 0 0 0 21 11h-2z"/></svg>
@@ -8940,6 +9052,8 @@ textarea.fld{resize:vertical}
         <div class="rowflex"><button id="bgUploadBtn" class="btn" type="button">Upload image</button><button id="bgRemoveBtn" class="btn" type="button">Remove</button></div>
         <input id="bgFile" type="file" accept="image/*" style="display:none">
         <div id="bgPreview" style="margin-top:8px"></div>
+        <p class="hint" style="margin-top:10px">HD wallpapers — tap one to use it as the chat background.</p>
+        <div id="bgWallpapers" class="libGallery"></div>
         <div id="bgMsg" class="hint"></div>
       </div>
       <div id="tab-data" class="tabpage" style="display:none">
@@ -8965,6 +9079,7 @@ const log=document.getElementById('log'), f=document.getElementById('f'), q=docu
   hamburger=document.getElementById('hamburger'), closeSide=document.getElementById('closeSide'),
   titleBtn=document.getElementById('titleBtn'), toast=document.getElementById('toast'),
   modeAgent=document.getElementById('modeAgent'), modeChat=document.getElementById('modeChat'),
+  modeAgentW=document.getElementById('modeAgentW'), modeChatW=document.getElementById('modeChatW'),
   micBtn=document.getElementById('micBtn'), attachBtn=document.getElementById('attachBtn'),
   personaBtn=document.getElementById('personaBtn'), personaBtnLabel=document.getElementById('personaBtnLabel'), chatSearch=document.getElementById('chatSearch'),
   imgBtn=document.getElementById('imgBtn'), vidBtn=document.getElementById('vidBtn'),
@@ -9069,7 +9184,12 @@ const THEMES={
   sunset:{name:'Sunset',bg:'#221627',panel:'#1a101f',panel2:'#2c1e33',border:'#4a2c3f',green:'#ff6b35',greenHover:'#e55a28',text:'#ffe8d6',muted:'#b99a8e',user:'#ff6b35',userfg:'#221627',ai:'#2c1e33',code:'#160d18',side:'#1a101f',hover:'#3d2436'},
   lavender:{name:'Lavender',bg:'#f6f2ff',panel:'#ffffff',panel2:'#ece7f8',border:'#ddd0f5',green:'#8b5cf6',greenHover:'#7c4def',text:'#3b2d5c',muted:'#8a7ba8',user:'#8b5cf6',userfg:'#ffffff',ai:'#ece7f8',code:'#efeaf9',side:'#ffffff',hover:'#e2d9f7'},
   midnight:{name:'Midnight',bg:'#0d1117',panel:'#161b22',panel2:'#21262d',border:'#30363d',green:'#58a6ff',greenHover:'#1f6feb',text:'#c9d1d9',muted:'#8b949e',user:'#1f6feb',userfg:'#ffffff',ai:'#161b22',code:'#0d1117',side:'#010409',hover:'#30363d'},
-  light:{name:'Light',bg:'#f3f5f7',panel:'#ffffff',panel2:'#eceff1',border:'#cbd3da',green:'#1DB954',greenHover:'#169c46',text:'#26313a',muted:'#6b7a88',user:'#1DB954',userfg:'#ffffff',ai:'#ffffff',code:'#e8ecef',side:'#ffffff',hover:'#dfe5e9'}
+  light:{name:'Light',bg:'#f3f5f7',panel:'#ffffff',panel2:'#eceff1',border:'#cbd3da',green:'#1DB954',greenHover:'#169c46',text:'#26313a',muted:'#6b7a88',user:'#1DB954',userfg:'#ffffff',ai:'#ffffff',code:'#e8ecef',side:'#ffffff',hover:'#dfe5e9'},
+  // Glass themes: panels and bubbles are semi-transparent (rgba) so a chat
+  // background image shows through them. They look best with a wallpaper set.
+  glassdark:{name:'Glass Dark',bg:'#0d1117',panel:'rgba(22,27,34,0.55)',panel2:'rgba(33,38,45,0.55)',border:'rgba(48,54,61,0.9)',green:'#58a6ff',greenHover:'#1f6feb',text:'#e6edf3',muted:'#8b949e',user:'rgba(31,111,235,0.55)',userfg:'#ffffff',ai:'rgba(22,27,34,0.55)',code:'rgba(13,17,23,0.6)',side:'rgba(1,4,9,0.55)',hover:'rgba(48,54,61,0.5)'},
+  glassgreen:{name:'Glass Green',bg:'#121212',panel:'rgba(26,26,26,0.55)',panel2:'rgba(36,36,36,0.55)',border:'rgba(44,44,44,0.9)',green:'#1DB954',greenHover:'#169c46',text:'#ffffff',muted:'#9a9a9a',user:'rgba(29,185,84,0.55)',userfg:'#ffffff',ai:'rgba(36,36,36,0.55)',code:'rgba(13,13,13,0.6)',side:'rgba(0,0,0,0.55)',hover:'rgba(46,46,46,0.5)'},
+  glasslight:{name:'Glass Light',bg:'#f3f5f7',panel:'rgba(255,255,255,0.55)',panel2:'rgba(236,239,241,0.55)',border:'rgba(203,211,218,0.9)',green:'#1DB954',greenHover:'#169c46',text:'#26313a',muted:'#6b7a88',user:'rgba(29,185,84,0.55)',userfg:'#ffffff',ai:'rgba(236,239,241,0.55)',code:'rgba(232,236,239,0.6)',side:'rgba(255,255,255,0.55)',hover:'rgba(223,229,233,0.5)'}
 };
 let currentTheme='spotify';
 try{ const t=localStorage.getItem('mawaxi-theme'); if(t && THEMES[t]) currentTheme=t; }catch(e){}
@@ -9208,6 +9328,20 @@ function handleBgFile(file){
 if(bgUploadBtn) bgUploadBtn.addEventListener('click',function(){ if(bgFile) bgFile.click(); });
 if(bgFile) bgFile.addEventListener('change',function(){ if(bgFile.files && bgFile.files[0]) handleBgFile(bgFile.files[0]); bgFile.value=''; });
 if(bgRemoveBtn) bgRemoveBtn.addEventListener('click',function(){ clearChatBg(); showToast('Chat background removed'); });
+  // ---------- HD wallpapers: built-in choices for the chat background ----------
+  const WALLPAPERS=[{name:'mountains',label:'Mountains'},{name:'nebula',label:'Nebula'},{name:'ocean',label:'Ocean'},{name:'forest',label:'Forest'}];
+  function renderWallpapers(){
+    const box=document.getElementById('bgWallpapers'); if(!box) return;
+    box.innerHTML='';
+    for(const w of WALLPAPERS){
+      const tile=document.createElement('button'); tile.type='button'; tile.className='libTile'; tile.title=w.label;
+      const thumb=document.createElement('img'); thumb.alt=w.label; thumb.src='/wallpapers/'+w.name;
+      tile.appendChild(thumb);
+      tile.addEventListener('click', function(){ applyChatBg('/wallpapers/'+w.name); showToast(w.label+' wallpaper set'); });
+      box.appendChild(tile);
+    }
+  }
+  renderWallpapers();
 try{ const savedBg=localStorage.getItem('mawaxi-chat-bg'); if(savedBg) applyChatBg(savedBg); else renderBgPreview(); }catch(e){ renderBgPreview(); }
 
 // ---------- Personas ----------
@@ -9254,7 +9388,7 @@ function tapToLoadBox(label, loadFn){
 if(dsToggle) dsToggle.addEventListener('click', function(){ setDataSaver(!dataSaver); showToast(dataSaver?'Data Saver on':'Data Saver off'); });
 setDataSaver(dataSaver);
 let pendingImage=null; let pendingPdf=null; let recActive=null;
-let mode='chat'; let currentRunId=null; let agentRunning=false; let agentReader=null; let chatBusy=false;
+let mode='chat'; try{ const sm=localStorage.getItem('mawaxi-mode'); if(sm==='agent'||sm==='chat') mode=sm; }catch(e){} let currentRunId=null; let agentRunning=false; let agentReader=null; let chatBusy=false;
 
 function showToast(msg){
   toast.textContent=msg; toast.style.display='block';
@@ -9430,15 +9564,25 @@ skillChipX.addEventListener('click', function(){
 personaBtn.addEventListener('click', function(){ const ids=Object.keys(PERSONAS); const next=ids[(ids.indexOf(currentPersona)+1)%ids.length]; applyPersona(next); showToast('Persona: '+PERSONAS[currentPersona]); });
 function setMode(m){
   mode=m;
-  modeAgent.classList.toggle('active', m==='agent');
-  modeChat.classList.toggle('active', m==='chat');
+  try{ localStorage.setItem('mawaxi-mode', m); }catch(e){}
+  if(modeAgent) modeAgent.classList.toggle('active', m==='agent');
+  if(modeChat) modeChat.classList.toggle('active', m==='chat');
+  if(modeAgentW) modeAgentW.classList.toggle('active', m==='agent');
+  if(modeChatW) modeChatW.classList.toggle('active', m==='chat');
   if(m==='agent'){
     refreshWorkspace();
     showToast('Agent mode on — I can run commands and edit files in the workspace');
   }
 }
-modeAgent.addEventListener('click', function(){setMode('agent');});
-modeChat.addEventListener('click', function(){setMode('chat');});
+if(modeAgent) modeAgent.addEventListener('click', function(){setMode('agent');});
+if(modeChat) modeChat.addEventListener('click', function(){setMode('chat');});
+if(modeAgentW) modeAgentW.addEventListener('click', function(){setMode('agent');});
+if(modeChatW) modeChatW.addEventListener('click', function(){setMode('chat');});
+// Restore the saved mode on load (no toast).
+if(modeAgent) modeAgent.classList.toggle('active', mode==='agent');
+if(modeChat) modeChat.classList.toggle('active', mode==='chat');
+if(modeAgentW) modeAgentW.classList.toggle('active', mode==='agent');
+if(modeChatW) modeChatW.classList.toggle('active', mode==='chat');
 function setWsVisible(show){
   wsPanel.style.display=show?'block':'none';
   openWorkspace.classList.toggle('active', show);
@@ -10515,48 +10659,156 @@ async function loadCbAll(){
 async function openLibraryView(){
   openFeature('Library');
   fvBody.innerHTML='<p class="hint">Everything saved on the phone.</p>'
-    +'<div class="fv-sec">Workspace files</div><div id="libWs"></div>'
-    +'<div class="fv-sec">Saved chats</div><div id="libChats"></div>'
-    +'<div class="fv-sec">Generated images</div><div id="libImgs"></div>';
-  try{
-    const r=await fetch('/api/workspace'); const items=await r.json();
+    +'<div class="libTabs">'
+    +'<button type="button" class="libTab active" data-libtab="files">Files</button>'
+    +'<button type="button" class="libTab" data-libtab="chats">Chats</button>'
+    +'<button type="button" class="libTab" data-libtab="images">Images</button>'
+    +'</div>'
+    +'<div id="libPanelFiles" class="libPanel"><input id="libFileSearch" class="fld" placeholder="Search files...">'
+    +'<div class="libToolbar"><span class="libTbLabel">View</span>'
+    +'<button type="button" class="libViewBtn" data-view="large">Large</button>'
+    +'<button type="button" class="libViewBtn" data-view="medium">Medium</button>'
+    +'<button type="button" class="libViewBtn" data-view="small">Small</button>'
+    +'<button type="button" class="libViewBtn" data-view="list">List</button>'
+    +'<span class="libTbLabel">Sort</span>'
+    +'<select id="libSortSel" class="libSortSel"><option value="name">Name</option><option value="date">Date modified</option><option value="size">Size</option><option value="type">Type</option></select>'
+    +'<button type="button" id="libSortDir" class="libViewBtn" title="Sort direction">&#8593;</button>'
+    +'</div><div id="libWs"></div></div>'
+    +'<div id="libPanelChats" class="libPanel" style="display:none"><input id="libChatSearch" class="fld" placeholder="Search chats..."><div id="libChats"></div></div>'
+    +'<div id="libPanelImages" class="libPanel" style="display:none"><div id="libImgs" class="libGallery"></div></div>';
+  const tabs=fvBody.querySelectorAll('.libTab');
+  function showLibTab(name){
+    tabs.forEach(function(t){ t.classList.toggle('active', t.getAttribute('data-libtab')===name); });
+    document.getElementById('libPanelFiles').style.display=name==='files'?'':'none';
+    document.getElementById('libPanelChats').style.display=name==='chats'?'':'none';
+    document.getElementById('libPanelImages').style.display=name==='images'?'':'none';
+  }
+  tabs.forEach(function(t){ t.addEventListener('click', function(){ showLibTab(t.getAttribute('data-libtab')); }); });
+  // Files, grouped by type
+  let wsItems=null;
+  try{ const r=await fetch('/api/workspace'); wsItems=await r.json(); }catch(e){}
+  function fileGroup(it){
+    if(it.is_dir) return 'Folders';
+    const p=(it.path||'').toLowerCase();
+    if(/\.(docx?|pdf|txt|md|rtf)$/.test(p)) return 'Documents';
+    if(/\.(xlsx?|csv)$/.test(p)) return 'Spreadsheets';
+    if(/\.(pptx?)$/.test(p)) return 'Presentations';
+    if(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(p)) return 'Images';
+    if(/\.(mp4|webm|mov|mp3|wav|m4a)$/.test(p)) return 'Media';
+    if(/\.(py|js|ts|rs|html|css|json|sh|toml|yaml|yml|xml)$/.test(p)) return 'Code';
+    return 'Other';
+  }
+  const GROUP_ORDER=['Folders','Documents','Spreadsheets','Presentations','Images','Media','Code','Other'];
+  function fileBadge(it){
+    const d=document.createElement('span'); d.className='libTileIcon';
+    if(it.is_dir){ d.textContent='Folder'; d.style.background='#78909c'; return d; }
+    const p=(it.path||'').toLowerCase();
+    const m=p.match(/\.([a-z0-9]+)$/);
+    const ext=m?m[1].toUpperCase():'FILE';
+    d.textContent=ext;
+    let bg='#616161';
+    if(ext==='PDF') bg='#d32f2f';
+    else if(ext==='DOC'||ext==='DOCX') bg='#2b579a';
+    else if(ext==='XLS'||ext==='XLSX'||ext==='CSV') bg='#217346';
+    else if(ext==='PPT'||ext==='PPTX') bg='#d24726';
+    else if(['JPG','JPEG','PNG','GIF','WEBP','BMP','SVG'].indexOf(ext)!==-1) bg='#7b1fa2';
+    else if(['MP4','WEBM','MOV','MP3','WAV','M4A'].indexOf(ext)!==-1) bg='#5d4037';
+    else if(['PY','JS','TS','RS','HTML','CSS','JSON','SH','TOML','YAML','YML','XML'].indexOf(ext)!==-1) bg='#37474f';
+    d.style.background=bg;
+    return d;
+  }
+  // Library view + sort (persisted)
+  let libView=localStorage.getItem('mawaxi-lib-view')||'large';
+  let libSort=localStorage.getItem('mawaxi-lib-sort')||'name';
+  let libDir=localStorage.getItem('mawaxi-lib-dir')||'asc';
+  function libExt(it){ const m=(it.path||'').toLowerCase().match(/\.([a-z0-9]+)$/); return m?m[1]:''; }
+  function libSortItems(arr){
+    const d=libDir==='desc'?-1:1;
+    arr.sort(function(a,b){
+      if(libSort==='size') return (a.size-b.size)*d;
+      if(libSort==='date') return ((a.mtime||0)-(b.mtime||0))*d;
+      if(libSort==='type'){ const x=libExt(a), y=libExt(b); if(x!==y) return (x<y?-1:1)*d; }
+      const an=(a.path||'').toLowerCase(), bn=(b.path||'').toLowerCase();
+      return (an<bn?-1:an>bn?1:0)*d;
+    });
+  }
+  function applyLibView(){
+    const w=document.getElementById('libWs'); if(w) w.className='view-'+libView;
+    const im=document.getElementById('libImgs'); if(im) im.className='libGallery view-'+libView;
+    document.querySelectorAll('.libViewBtn[data-view]').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-view')===libView); });
+    const s=document.getElementById('libSortSel'); if(s) s.value=libSort;
+    const dr=document.getElementById('libSortDir'); if(dr) dr.innerHTML=libDir==='desc'?'&#8595;':'&#8593;';
+  }
+  function renderFiles(){
+    applyLibView();
     const box=document.getElementById('libWs');
-    if(!items.length){ box.innerHTML='<p class="hint">Workspace is empty.</p>'; }
-    else{
-      for(const it of items){
-        const row=document.createElement('div'); row.className='listrow';
-        const info=document.createElement('div'); info.className='info';
-        const nm=document.createElement('div'); nm.className='nm'; nm.textContent=it.path+(it.is_dir?' /':'');
-        info.appendChild(nm);
-        row.appendChild(info);
+    const q=(document.getElementById('libFileSearch').value||'').toLowerCase();
+    if(wsItems===null){ box.innerHTML='<p class="hint">Could not load workspace.</p>'; return; }
+    const items=wsItems.filter(function(it){ return !q || (it.path||'').toLowerCase().indexOf(q)!==-1; });
+    if(!items.length){ box.innerHTML='<p class="hint">No files match.</p>'; return; }
+    const groups={};
+    items.forEach(function(it){ const g=fileGroup(it); (groups[g]=groups[g]||[]).push(it); });
+    box.innerHTML='';
+    GROUP_ORDER.forEach(function(g){
+      const arr=groups[g]; if(!arr||!arr.length) return;
+      libSortItems(arr);
+      const h=document.createElement('div'); h.className='libGroup'; h.textContent=g+' ('+arr.length+')';
+      box.appendChild(h);
+      const grid=document.createElement('div'); grid.className='libGallery';
+      box.appendChild(grid);
+      arr.forEach(function(it){
+        const tile=document.createElement('button'); tile.type='button'; tile.className='libTile';
+        tile.appendChild(fileBadge(it));
+        const cap=document.createElement('span'); cap.className='libTileCap'; cap.textContent=it.path+(it.is_dir?' /':'');
+        tile.appendChild(cap);
         if(!it.is_dir){
-          const open=document.createElement('button'); open.className='mini'; open.textContent='Open';
-          open.addEventListener('click', function(){ openWsFile(it.path); });
-          row.appendChild(open);
+          tile.addEventListener('click', function(){ openWsFile(it.path); });
         }
-        box.appendChild(row);
-      }
-    }
-  }catch(e){ document.getElementById('libWs').innerHTML='<p class="hint">Could not load workspace.</p>'; }
-  try{
-    const r=await fetch('/api/chats'); const list=await r.json();
+        grid.appendChild(tile);
+      });
+    });
+  }
+  document.getElementById('libFileSearch').addEventListener('input', renderFiles);
+  renderFiles();
+  document.querySelectorAll('.libViewBtn[data-view]').forEach(function(b){
+    b.addEventListener('click', function(){ libView=b.getAttribute('data-view'); localStorage.setItem('mawaxi-lib-view', libView); applyLibView(); });
+  });
+  document.getElementById('libSortSel').addEventListener('change', function(){
+    libSort=this.value; libDir=(libSort==='date')?'desc':'asc';
+    localStorage.setItem('mawaxi-lib-sort', libSort); localStorage.setItem('mawaxi-lib-dir', libDir);
+    applyLibView(); renderFiles();
+  });
+  document.getElementById('libSortDir').addEventListener('click', function(){
+    libDir=libDir==='desc'?'asc':'desc'; localStorage.setItem('mawaxi-lib-dir', libDir);
+    applyLibView(); renderFiles();
+  });
+  applyLibView();
+  // Chats, searchable
+  let chatList=null;
+  try{ const r=await fetch('/api/chats'); chatList=await r.json(); }catch(e){}
+  function renderChats(){
     const box=document.getElementById('libChats');
-    if(!list.length){ box.innerHTML='<p class="hint">No saved chats yet.</p>'; }
-    else{
-      for(const c of list){
-        const row=document.createElement('div'); row.className='listrow';
-        const info=document.createElement('div'); info.className='info';
-        const nm=document.createElement('div'); nm.className='nm'; nm.textContent=c.title||'Untitled';
-        const sub=document.createElement('div'); sub.className='sub'; sub.textContent=fmtChatDate(c.updated_at);
-        info.appendChild(nm); info.appendChild(sub);
-        info.addEventListener('click', async function(){ closeFeature(); await openChat(c.id); });
-        row.appendChild(info); box.appendChild(row);
-      }
+    const q=(document.getElementById('libChatSearch').value||'').toLowerCase();
+    if(chatList===null){ box.innerHTML='<p class="hint">Could not load chats.</p>'; return; }
+    const list=chatList.filter(function(c){ return !q || (c.title||'Untitled').toLowerCase().indexOf(q)!==-1; });
+    if(!list.length){ box.innerHTML='<p class="hint">No chats match.</p>'; return; }
+    box.innerHTML='';
+    for(const c of list){
+      const row=document.createElement('div'); row.className='listrow';
+      const info=document.createElement('div'); info.className='info';
+      const nm=document.createElement('div'); nm.className='nm'; nm.textContent=c.title||'Untitled';
+      const sub=document.createElement('div'); sub.className='sub'; sub.textContent=fmtChatDate(c.updated_at);
+      info.appendChild(nm); info.appendChild(sub);
+      info.addEventListener('click', async function(){ closeFeature(); await openChat(c.id); });
+      row.appendChild(info); box.appendChild(row);
     }
-  }catch(e){ document.getElementById('libChats').innerHTML='<p class="hint">Could not load chats.</p>'; }
+  }
+  document.getElementById('libChatSearch').addEventListener('input', renderChats);
+  renderChats();
+  // Images gallery
   const imgBox=document.getElementById('libImgs');
-  const seen={}; let found=0;
-  for(const c of chats.slice(0,20)){
+  const seen={}; let found=0; const galleryItems=[];
+  for(const c of (chatList||[]).slice(0,20)){
     try{
       const r=await fetch('/api/chats/'+encodeURIComponent(c.id));
       if(!r.ok) continue;
@@ -10564,27 +10816,45 @@ async function openLibraryView(){
       for(const m of (full.messages||[])){
         if(m.image && !seen[m.image]){
           seen[m.image]=true; found++;
-          const row=document.createElement('div'); row.className='listrow';
-          const thumb=document.createElement('img'); thumb.alt=''; thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0';
-          if(dataSaver){
-            // Data Saver: thumbnails do not download until tapped.
-            thumb.src='';
-            thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;background:var(--panel2);border:1px dashed var(--border);cursor:pointer;';
-            thumb.alt='Tap to load';
-            thumb.addEventListener('click', function(){ thumb.src=m.image; thumb.style.cursor='default'; });
-          }else{
-            thumb.src=m.image;
-          }
-          const info=document.createElement('div'); info.className='info';
-          const nm=document.createElement('div'); nm.className='sub2'; nm.textContent=(m.content||'Image').slice(0,100);
-          info.appendChild(nm);
-          info.addEventListener('click', function(){ window.open(m.image, '_blank'); });
-          row.appendChild(thumb); row.appendChild(info); imgBox.appendChild(row);
+          galleryItems.push({src:m.image, cap:(m.content||'Image').slice(0,120)});
         }
       }
     }catch(e){}
   }
   if(!found){ imgBox.innerHTML='<p class="hint">No generated images yet.</p>'; }
+  else{
+    for(let gi=0; gi<galleryItems.length; gi++){
+      const item=galleryItems[gi];
+      const tile=document.createElement('button'); tile.type='button'; tile.className='libTile';
+      const thumb=document.createElement('img'); thumb.alt=item.cap;
+      if(dataSaver){ thumb.src=''; thumb.alt='Tap to load'; tile.classList.add('libTilePlaceholder'); }
+      else{ thumb.src=item.src; }
+      tile.appendChild(thumb);
+      const cap=document.createElement('span'); cap.className='libTileCap'; cap.textContent=item.cap;
+      tile.appendChild(cap);
+      tile.addEventListener('click', function(){
+        if(dataSaver && !thumb.src){ thumb.src=item.src; tile.classList.remove('libTilePlaceholder'); }
+        openLightbox(item.src, item.cap);
+      });
+      imgBox.appendChild(tile);
+    }
+  }
+}
+
+// ---------- Gallery lightbox: full-screen view of a Library image ----------
+function openLightbox(imgSrc, caption){
+  let lb=document.getElementById('libLightbox');
+  if(!lb){
+    lb=document.createElement('div'); lb.id='libLightbox';
+    lb.innerHTML='<button id="libLbClose" class="iconbtn" type="button" title="Close">&#10005;</button><img id="libLbImg" alt=""><div id="libLbCap"></div>';
+    document.body.appendChild(lb);
+    document.getElementById('libLbClose').addEventListener('click', function(){ lb.style.display='none'; });
+    lb.addEventListener('click', function(e){ if(e.target===lb) lb.style.display='none'; });
+  }
+  const im=document.getElementById('libLbImg');
+  im.src=imgSrc; im.alt=caption||'';
+  document.getElementById('libLbCap').textContent=caption||'';
+  lb.style.display='flex';
 }
 
 // ---------- In-app browser ----------
@@ -11141,28 +11411,34 @@ modelSel.addEventListener('change', async function(){
 // free model without guessing. Values match the picker format:
 // plain name for local, 'endpoint:<id>:<model>' for endpoints.
 const FREE_MODELS=[
- ['qwen3-abliterated-0.6b','Local \u00b7 qwen3-abliterated-0.6b'],
- ['endpoint:18e9cbc6a808cdb9:deepseek-v4-1-flash-1017','Conea \u00b7 deepseek-v4-1-flash-1017'],
- ['endpoint:18e9cbc6a808cdb9:gemini-3-8-flash','Conea \u00b7 gemini-3-8-flash'],
- ['endpoint:18e9cbc6a808cdb9:gpt-6-luna','Conea \u00b7 gpt-6-luna'],
- ['endpoint:18ea2d640f815753:gemini-2.5-flash','Gemini \u00b7 gemini-2.5-flash'],
- ['endpoint:18ea2d640f815753:gemini-2.5-flash-lite','Gemini \u00b7 gemini-2.5-flash-lite'],
- ['endpoint:18ea2d640f815753:gemini-3.5-flash-lite','Gemini \u00b7 gemini-3.5-flash-lite'],
- ['endpoint:18ea2d640f815753:gemini-3-flash-preview','Gemini \u00b7 gemini-3-flash-preview'],
- ['endpoint:18ea2d640f815753:gemini-flash-lite-latest','Gemini \u00b7 gemini-flash-lite-latest'],
- ['endpoint:18ea2d640f815753:gemini-3.6-flash','Gemini \u00b7 gemini-3.6-flash'],
- ['endpoint:18ea4fac9476a655:allam-2-7b','Groq \u00b7 allam-2-7b'],
- ['endpoint:18ea4fac9476a655:openai/gpt-oss-120b','Groq \u00b7 gpt-oss-120b'],
- ['endpoint:18ea4fac9476a655:openai/gpt-oss-20b','Groq \u00b7 gpt-oss-20b'],
- ['endpoint:18ea4fac9476a655:openai/gpt-oss-safeguard-20b','Groq \u00b7 gpt-oss-safeguard-20b'],
- ['endpoint:18ea4fac9476a655:qwen/qwen3.8-27b','Groq \u00b7 qwen3.8-27b'],
- ['endpoint:18ea2e312284c53c:agnes-2.5-flash','Agness \u00b7 agnes-2.5-flash'],
- ['endpoint:18ea2e312284c53c:agnes-3.0-flash','Agness \u00b7 agnes-3.0-flash'],
- ['endpoint:18eb423796aee255:particle','free-pi \u00b7 particle'],
- ['endpoint:18eb423796aee255:deepseek-v4.1-flash','free-pi \u00b7 deepseek-v4.1-flash'],
- ['endpoint:18eb423796aee255:glm-5.3-flash','free-pi \u00b7 glm-5.3-flash'],
- ['endpoint:18eb423796aee255:gpt-oss-20b','free-pi \u00b7 gpt-oss-20b'],
- ['endpoint:18eb423796aee255:solar-mini-4','free-pi \u00b7 solar-mini-4']
+  ['qwen3-abliterated-0.6b','Local · qwen3-abliterated-0.6b'],
+  ['endpoint:18e9cbc6a808cdb9:deepseek-v4-1-flash-1017','Conea · deepseek-v4-1-flash-1017'],
+  ['endpoint:18e9cbc6a808cdb9:gemini-3-8-flash','Conea · gemini-3-8-flash'],
+  ['endpoint:18e9cbc6a808cdb9:gpt-6-luna','Conea · gpt-6-luna'],
+  ['endpoint:18ea2d640f815753:gemini-2.5-flash','Gemini · gemini-2.5-flash'],
+  ['endpoint:18ea2d640f815753:gemini-2.5-flash-lite','Gemini · gemini-2.5-flash-lite'],
+  ['endpoint:18ea2d640f815753:gemini-3.5-flash-lite','Gemini · gemini-3.5-flash-lite'],
+  ['endpoint:18ea2d640f815753:gemini-3-flash-preview','Gemini · gemini-3-flash-preview'],
+  ['endpoint:18ea2d640f815753:gemini-flash-lite-latest','Gemini · gemini-flash-lite-latest'],
+  ['endpoint:18ea2d640f815753:gemini-3.6-flash','Gemini · gemini-3.6-flash'],
+  ['endpoint:18ea2d640f815753:gemini-3.8-flash','Gemini · gemini-3.8-flash'],
+  ['endpoint:18ea4fac9476a655:allam-2-7b','Groq · allam-2-7b'],
+  ['endpoint:18ea4fac9476a655:openai/gpt-oss-120b','Groq · openai/gpt-oss-120b'],
+  ['endpoint:18ea4fac9476a655:openai/gpt-oss-20b','Groq · openai/gpt-oss-20b'],
+  ['endpoint:18ea4fac9476a655:openai/gpt-oss-safeguard-20b','Groq · openai/gpt-oss-safeguard-20b'],
+  ['endpoint:18ea4fac9476a655:qwen/qwen3.8-27b','Groq · qwen/qwen3.8-27b'],
+  ['endpoint:18ea2e312284c53c:agnes-2.5-flash','Agness · agnes-2.5-flash'],
+  ['endpoint:18ea2e312284c53c:agnes-3.0-flash','Agness · agnes-3.0-flash'],
+  ['endpoint:18ea2e312284c53c:agnes-2.5-pro-theta','Agness · agnes-2.5-pro-theta'],
+  ['endpoint:18ea2e312284c53c:agnes-3.0-pro','Agness · agnes-3.0-pro'],
+  ['endpoint:18eb423796aee255:particle','free-pi · particle'],
+  ['endpoint:18eb423796aee255:deepseek-v4.1-flash','free-pi · deepseek-v4.1-flash'],
+  ['endpoint:18eb423796aee255:glm-5.3-flash','free-pi · glm-5.3-flash'],
+  ['endpoint:18eb423796aee255:gpt-oss-20b','free-pi · gpt-oss-20b'],
+  ['endpoint:18eb423796aee255:solar-mini-4','free-pi · solar-mini-4'],
+  ['endpoint:18eb423796aee255:hy4-flash','free-pi · hy4-flash'],
+  ['endpoint:18eb423796aee255:ling-3.0-flash','free-pi · ling-3.0-flash'],
+  ['endpoint:18eb423796aee255:ling-3.1-flash','free-pi · ling-3.1-flash']
 ];
 async function refreshModelSelect(){
   // Combined picker: Local Ollama models + every saved endpoint's models,
@@ -11504,7 +11780,9 @@ function renderChatList(){
     tx.appendChild(t); tx.appendChild(dd);
     const del=document.createElement('button'); del.className='del'; del.textContent='x'; del.title='Delete chat';
     del.addEventListener('click', function(e){e.stopPropagation(); deleteChat(c.id);});
-    div.appendChild(tx); div.appendChild(del);
+    const ren=document.createElement('button'); ren.className='ren'; ren.textContent='\u270e'; ren.title='Rename chat';
+    ren.addEventListener('click', function(e){e.stopPropagation(); renameChat(c.id, c.title||'');});
+    div.appendChild(tx); div.appendChild(ren); div.appendChild(del);
     div.addEventListener('click', function(){openChat(c.id);});
     chatlist.appendChild(div);
   }
@@ -11629,6 +11907,22 @@ async function saveChat(){
   try{
     await fetch('/api/chats/'+encodeURIComponent(current.id), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(current)});
     const r=await fetch('/api/chats'); chats=await r.json(); renderChatList();
+  }catch(e){}
+}
+async function renameChat(id, oldTitle){
+  const name=prompt('Rename chat', oldTitle||'');
+  if(name===null) return;
+  const t=name.trim();
+  if(!t || t===oldTitle) return;
+  try{
+    const r=await fetch('/api/chats/'+encodeURIComponent(id));
+    if(!r.ok) return;
+    const chat=await r.json();
+    chat.title=t;
+    await fetch('/api/chats/'+encodeURIComponent(id), {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(chat)});
+    const r2=await fetch('/api/chats'); chats=await r2.json(); renderChatList();
+    if(current && current.id===id){ current.title=t; }
+    showToast('Chat renamed');
   }catch(e){}
 }
 async function deleteChat(id){
@@ -12222,6 +12516,7 @@ function stepFinish(ev){
     const file=(lastLog && lastLog.args)? (lastLog.args.split('\n')[0].split('/').pop() || 'diff') : 'diff';
     stepDiffBox(body, ev.diff, file);
   }
+  if(ev.tool==='write_file' && ok && lastLog && lastLog.args){ const p=String(lastLog.args).split('\n')[0].trim(); if(p) openEditor(p); }
   if(!ok){ const e=document.createElement('div'); e.className='err'; e.textContent='\u2014 exit '+ev.exit_code+' \u2014'; body.appendChild(e); }
   const ico=node.querySelector('.astep-ico');
   const st=node.querySelector('.astep-status');
@@ -12229,6 +12524,38 @@ function stepFinish(ev){
   else { node.classList.add('err'); if(ico) ico.textContent='\u2717'; if(st) st.textContent='failed'; }
   log.scrollTop=log.scrollHeight;
 }
+let editorPath='', editorDirty=false;
+const editorPanel=document.getElementById('editorPanel'), editorTitle=document.getElementById('editorTitle'), editorPathEl=document.getElementById('editorPath'), editorBody=document.getElementById('editorBody'), editorStatus=document.getElementById('editorStatus');
+function editorBase(p){ const parts=String(p||'').split('/'); return parts[parts.length-1]||String(p||''); }
+async function openEditor(path){
+  try{
+    const r=await fetch('/api/workspace/file?path='+encodeURIComponent(path));
+    if(!r.ok){ if(editorStatus) editorStatus.textContent='Could not open file'; return; }
+    const j=await r.json();
+    editorPath=j.path||path;
+    editorTitle.textContent=editorBase(editorPath);
+    editorPathEl.textContent=editorPath;
+    editorBody.value=j.content||'';
+    editorDirty=false;
+    if(editorStatus) editorStatus.textContent='';
+    editorPanel.style.display='flex';
+  }catch(e){ if(editorStatus) editorStatus.textContent='Could not open file'; }
+}
+function closeEditor(){ editorPanel.style.display='none'; editorPath=''; }
+async function saveEditor(){
+  if(!editorPath) return;
+  if(editorStatus) editorStatus.textContent='Saving...';
+  try{
+    const r=await fetch('/api/workspace/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:editorPath,content:editorBody.value})});
+    if(!r.ok){ if(editorStatus) editorStatus.textContent='Save failed'; return; }
+    editorDirty=false;
+    if(editorStatus) editorStatus.textContent='Saved';
+    refreshWorkspace();
+  }catch(e){ if(editorStatus) editorStatus.textContent='Save failed'; }
+}
+if(document.getElementById('editorClose')) document.getElementById('editorClose').addEventListener('click', closeEditor);
+if(document.getElementById('editorSave')) document.getElementById('editorSave').addEventListener('click', saveEditor);
+if(editorBody) editorBody.addEventListener('input', function(){ editorDirty=true; if(editorStatus) editorStatus.textContent='Unsaved changes'; });
 async function refreshWorkspace(){
   try{
     const rs=await fetch('/api/settings');
@@ -12244,7 +12571,7 @@ async function refreshWorkspace(){
       const row=document.createElement('div'); row.className='wsrow';
       const nm=document.createElement('span'); nm.className='nm'; nm.textContent=it.path+(it.is_dir?' /':'');
       const sz=document.createElement('span'); sz.className='sz'; sz.textContent=it.is_dir?'':fmtSize(it.size);
-      row.appendChild(nm); row.appendChild(sz); wsList.appendChild(row);
+      row.appendChild(nm); row.appendChild(sz); if(!it.is_dir){ row.style.cursor='pointer'; row.title='Tap to open in editor'; row.addEventListener('click', function(){ openEditor(it.path); }); } wsList.appendChild(row);
     }
   }catch(e){}
 }
