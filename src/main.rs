@@ -1562,8 +1562,8 @@ const COPILOT_CLIENT_ID: &str = "01ab8ac9400c4e429b23"; // public VS Code client
 const COPILOT_BASE: &str = "https://api.githubcopilot.com";
 const COPILOT_API_VERSION: &str = "2026-06-01";
 const COPILOT_INTEGRATION_ID: &str = "vscode-chat";
-const COPILOT_USER_AGENT: &str = "MawaxiAI/1.0";
-const COPILOT_EDITOR_VERSION: &str = "MawaxiAI/1.0";
+const COPILOT_USER_AGENT: &str = "AthenaAI/1.0";
+const COPILOT_EDITOR_VERSION: &str = "AthenaAI/1.0";
 const COPILOT_DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const COPILOT_ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 
@@ -2715,7 +2715,7 @@ async fn browser_fetch(
         .get(&url)
         .header(
             "User-Agent",
-            "Mozilla/5.0 (Linux; Android 10) MawaxiAI/1.0",
+            "Mozilla/5.0 (Linux; Android 10) AthenaAI/1.0",
         )
         .send()
         .await
@@ -3427,7 +3427,7 @@ fn img_helper_path() -> PathBuf {
 /// Returns None when the bytes are not a convertible image (WebP and
 /// HTML error pages both fail here — they must never become a fake photo).
 fn convert_image_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
-    let path = std::env::temp_dir().join(format!("mawaxi-img-{}.bin", gen_id()));
+    let path = std::env::temp_dir().join(format!("athena-img-{}.bin", gen_id()));
     if fs::write(&path, bytes).is_err() {
         return None;
     }
@@ -7373,7 +7373,7 @@ async fn main() {
         // 2 MB, which rejected any PDF over ~1.5 MB with 413.
         .layer(DefaultBodyLimit::max(30 * 1024 * 1024));
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    println!("mawaxi-ai listening on http://{addr}");
+    println!("athena-ai listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -7521,12 +7521,12 @@ mod tests {
 
     #[test]
     fn parse_tool_call_fenced() {
-        let reply = "I will write the file.\n```tool\nwrite_file\nhello.txt\nHello Mawaxi\n```";
+        let reply = "I will write the file.\n```tool\nwrite_file\nhello.txt\nHello Athena\n```";
         let (tool, args) = parse_tool_call(reply).unwrap();
         assert_eq!(tool, "write_file");
         let (path, content) = normalise_tool_args(&tool, &args);
         assert_eq!(path, "hello.txt");
-        assert_eq!(content, "Hello Mawaxi");
+        assert_eq!(content, "Hello Athena");
     }
 
     #[test]
@@ -7539,12 +7539,12 @@ mod tests {
 
     #[test]
     fn parse_tool_call_quoted_args() {
-        let reply = "```tool\nwrite_file\n\"hello.txt\"\n\"Hello Mawaxi\"\n```";
+        let reply = "```tool\nwrite_file\n\"hello.txt\"\n\"Hello Athena\"\n```";
         let (tool, args) = parse_tool_call(reply).unwrap();
         assert_eq!(tool, "write_file");
         let (path, content) = normalise_tool_args(&tool, &args);
         assert_eq!(path, "hello.txt");
-        assert_eq!(content, "Hello Mawaxi");
+        assert_eq!(content, "Hello Athena");
     }
 
     #[test]
@@ -7875,7 +7875,7 @@ mod tests {
         assert!(INDEX_HTML.contains("id=\"tab-theme\""));
         assert!(INDEX_HTML.contains("THEMES"));
         assert!(INDEX_HTML.contains("applyTheme"));
-        assert!(INDEX_HTML.contains("mawaxi-theme"));
+        assert!(INDEX_HTML.contains("athena-theme"));
         assert!(INDEX_HTML.contains("Snapchat"));
         assert!(INDEX_HTML.contains("Spotify"));
         assert!(INDEX_HTML.contains("TikTok"));
@@ -7887,11 +7887,11 @@ mod tests {
         assert!(INDEX_HTML.contains("Glass Green"));
         assert!(INDEX_HTML.contains("Glass Light"));
         // Chat text size + zoom: size picker in Settings, zoom buttons in header.
-        assert!(INDEX_HTML.contains("mawaxi-chat-font-size"));
+        assert!(INDEX_HTML.contains("athena-chat-font-size"));
         assert!(INDEX_HTML.contains("id=\"fontSizeRow\""));
         assert!(INDEX_HTML.contains("applyChatFontSize"));
         assert!(INDEX_HTML.contains("CHAT_FONT_SIZES"));
-        assert!(INDEX_HTML.contains("mawaxi-chat-zoom"));
+        assert!(INDEX_HTML.contains("athena-chat-zoom"));
         assert!(INDEX_HTML.contains("id=\"zoomIn\""));
         assert!(INDEX_HTML.contains("id=\"zoomOut\""));
         assert!(INDEX_HTML.contains("id=\"zoomLabel\""));
@@ -7899,7 +7899,7 @@ mod tests {
         assert!(INDEX_HTML.contains("--chat-font-size"));
         assert!(INDEX_HTML.contains("--chat-zoom"));
         // Chat background image: picker in Settings > Theme, behind the bubbles.
-        assert!(INDEX_HTML.contains("mawaxi-chat-bg"));
+        assert!(INDEX_HTML.contains("athena-chat-bg"));
         assert!(INDEX_HTML.contains("id=\"bgUploadBtn\""));
         assert!(INDEX_HTML.contains("id=\"bgRemoveBtn\""));
         assert!(INDEX_HTML.contains("id=\"bgFile\""));
@@ -7909,7 +7909,7 @@ mod tests {
         // Data Saver: toggle in Settings, persisted, wired into image/video.
         assert!(INDEX_HTML.contains("data-tab=\"data\""));
         assert!(INDEX_HTML.contains("id=\"tab-data\""));
-        assert!(INDEX_HTML.contains("mawaxi-data-saver"));
+        assert!(INDEX_HTML.contains("athena-data-saver"));
         assert!(INDEX_HTML.contains("dataSaver"));
         assert!(INDEX_HTML.contains("tapToLoadBox"));
         // Calendar: sidebar button, month view, server endpoints.
@@ -8056,7 +8056,7 @@ mod tests {
 
     #[test]
     fn save_pdf_to_library_writes_valid_pdf() {
-        let dir = std::env::temp_dir().join(format!("mawaxi-pdf-test-{}", now_secs()));
+        let dir = std::env::temp_dir().join(format!("athena-pdf-test-{}", now_secs()));
         let _ = std::fs::create_dir_all(&dir);
         let index = dir.join("pdfs.json");
         let entry = save_pdf_to_library_at(
@@ -8516,7 +8516,7 @@ mod tests {
         let plain = build_system_prompt(None, &[], None, false).expect("prompt exists");
         assert!(!plain.contains("medical laboratory scientist"));
         assert!(INDEX_HTML.contains("id=\"personaBtn\""));
-        assert!(INDEX_HTML.contains("mawaxi-persona"));
+        assert!(INDEX_HTML.contains("athena-persona"));
         assert!(INDEX_HTML.contains("persona: currentPersona"));
     }
 
@@ -8957,7 +8957,7 @@ textarea.fld{resize:vertical}
 }
 </style>
 
-<style id="mawaxi-polish">
+<style id="athena-polish">
 :root{
   --bg:#0f1319;
   --panel:#131922;
@@ -9335,9 +9335,9 @@ let chats=[]; let current=null; let currentModel=DEFAULT_MODEL;
 let toastTimer=null; let searchTimer=null;
 let endpoints=[]; let presets=[]; let memories=[]; let skills=[]; let epFetchedModels=[];
 let activeEndpointId='';
-try{ activeEndpointId=localStorage.getItem('mawaxi_active_endpoint')||''; }catch(e){}
+try{ activeEndpointId=localStorage.getItem('athena_active_endpoint')||''; }catch(e){}
 let activePuterModel='';
-try{ activePuterModel=localStorage.getItem('mawaxi_active_puter')||''; }catch(e){}
+try{ activePuterModel=localStorage.getItem('athena_active_puter')||''; }catch(e){}
 // Puter (puter.js) free higher-end models, shown as a "Puter" group in the model picker.
 // The browser calls puter.ai.chat() directly; the server never sees a Puter token.
 const PUTER_MODELS=[
@@ -9357,8 +9357,8 @@ function puterReady(){ return (typeof window.puter!=='undefined' && window.puter
 function setActivePuter(mid){
   activePuterModel=mid||'';
   try{
-    if(activePuterModel) localStorage.setItem('mawaxi_active_puter', activePuterModel);
-    else localStorage.removeItem('mawaxi_active_puter');
+    if(activePuterModel) localStorage.setItem('athena_active_puter', activePuterModel);
+    else localStorage.removeItem('athena_active_puter');
   }catch(e){}
   refreshModelSelect();
 }
@@ -9386,7 +9386,7 @@ const THEMES={
   glasslight:{name:'Glass Light',bg:'#f3f5f7',panel:'rgba(255,255,255,0.55)',panel2:'rgba(236,239,241,0.55)',border:'rgba(203,211,218,0.9)',green:'#1DB954',greenHover:'#169c46',text:'#26313a',muted:'#6b7a88',user:'rgba(29,185,84,0.55)',userfg:'#ffffff',ai:'rgba(236,239,241,0.55)',code:'rgba(232,236,239,0.6)',side:'rgba(255,255,255,0.55)',hover:'rgba(223,229,233,0.5)'}
 };
 let currentTheme='spotify';
-try{ const t=localStorage.getItem('mawaxi-theme'); if(t && THEMES[t]) currentTheme=t; }catch(e){}
+try{ const t=localStorage.getItem('athena-theme'); if(t && THEMES[t]) currentTheme=t; }catch(e){}
 function applyTheme(name){
   const t=THEMES[name]; if(!t) return;
   currentTheme=name;
@@ -9396,7 +9396,7 @@ function applyTheme(name){
   r.setProperty('--text',t.text); r.setProperty('--muted',t.muted); r.setProperty('--user',t.user);
   r.setProperty('--userfg',t.userfg); r.setProperty('--ai',t.ai); r.setProperty('--code',t.code);
   r.setProperty('--side',t.side); r.setProperty('--hover',t.hover);
-  try{ localStorage.setItem('mawaxi-theme',name); }catch(e){}
+  try{ localStorage.setItem('athena-theme',name); }catch(e){}
   renderThemeGrid();
   if(themeMsg) themeMsg.textContent='Theme: '+t.name;
 }
@@ -9424,12 +9424,12 @@ applyTheme(currentTheme);
 const CHAT_FONT_SIZES={small:14,normal:16,large:18,xlarge:21};
 const CHAT_FONT_NAMES={small:'Small',normal:'Normal',large:'Large',xlarge:'Extra Large'};
 let chatFontSize='normal';
-try{ const s=localStorage.getItem('mawaxi-chat-font-size'); if(s && CHAT_FONT_SIZES[s]) chatFontSize=s; }catch(e){}
+try{ const s=localStorage.getItem('athena-chat-font-size'); if(s && CHAT_FONT_SIZES[s]) chatFontSize=s; }catch(e){}
 function applyChatFontSize(name){
   if(!CHAT_FONT_SIZES[name]) return;
   chatFontSize=name;
   document.documentElement.style.setProperty('--chat-font-size',CHAT_FONT_SIZES[name]+'px');
-  try{ localStorage.setItem('mawaxi-chat-font-size',name); }catch(e){}
+  try{ localStorage.setItem('athena-chat-font-size',name); }catch(e){}
   renderFontSizeRow();
   if(fontSizeMsg) fontSizeMsg.textContent='Chat text size: '+CHAT_FONT_NAMES[name];
 }
@@ -9445,11 +9445,11 @@ function renderFontSizeRow(){
   }
 }
 let chatZoom=1;
-try{ const z=parseFloat(localStorage.getItem('mawaxi-chat-zoom')); if(z>=0.8&&z<=1.5) chatZoom=z; }catch(e){}
+try{ const z=parseFloat(localStorage.getItem('athena-chat-zoom')); if(z>=0.8&&z<=1.5) chatZoom=z; }catch(e){}
 function applyChatZoom(z){
   chatZoom=Math.min(1.5,Math.max(0.8,Math.round(z*10)/10));
   document.documentElement.style.setProperty('--chat-zoom',chatZoom);
-  try{ localStorage.setItem('mawaxi-chat-zoom',String(chatZoom)); }catch(e){}
+  try{ localStorage.setItem('athena-chat-zoom',String(chatZoom)); }catch(e){}
   if(zoomLabel) zoomLabel.textContent=Math.round(chatZoom*100)+'%';
 }
 function zoomStep(d){ applyChatZoom(chatZoom+d); }
@@ -9462,7 +9462,7 @@ applyChatZoom(chatZoom);
 // ---------- Chat background image ----------
 // An image behind the chat bubbles, set from Settings > Theme. The image is
 // downscaled to at most 1024px on its longest side and stored as a JPEG data
-// URL in localStorage ('mawaxi-chat-bg'), so it stays on this phone and
+// URL in localStorage ('athena-chat-bg'), so it stays on this phone and
 // survives reloads. The bubbles keep their solid theme colours, so text stays
 // readable over the picture.
 function applyChatBg(dataUrl){
@@ -9470,7 +9470,7 @@ function applyChatBg(dataUrl){
   log.style.backgroundImage='url("'+dataUrl+'")';
   log.style.backgroundSize='cover';
   log.style.backgroundPosition='center';
-  try{ localStorage.setItem('mawaxi-chat-bg',dataUrl); }catch(e){}
+  try{ localStorage.setItem('athena-chat-bg',dataUrl); }catch(e){}
   renderBgPreview();
   if(bgMsg) bgMsg.textContent='Chat background: set';
 }
@@ -9478,14 +9478,14 @@ function clearChatBg(){
   log.style.backgroundImage='';
   log.style.backgroundSize='';
   log.style.backgroundPosition='';
-  try{ localStorage.removeItem('mawaxi-chat-bg'); }catch(e){}
+  try{ localStorage.removeItem('athena-chat-bg'); }catch(e){}
   renderBgPreview();
   if(bgMsg) bgMsg.textContent='Chat background: none';
 }
 function renderBgPreview(){
   if(!bgPreview) return;
   let dataUrl=null;
-  try{ dataUrl=localStorage.getItem('mawaxi-chat-bg'); }catch(e){}
+  try{ dataUrl=localStorage.getItem('athena-chat-bg'); }catch(e){}
   bgPreview.innerHTML='';
   if(dataUrl){
     const img=document.createElement('img');
@@ -9536,7 +9536,7 @@ if(bgRemoveBtn) bgRemoveBtn.addEventListener('click',function(){ clearChatBg(); 
     }
   }
   renderWallpapers();
-try{ const savedBg=localStorage.getItem('mawaxi-chat-bg'); if(savedBg) applyChatBg(savedBg); else renderBgPreview(); }catch(e){ renderBgPreview(); }
+try{ const savedBg=localStorage.getItem('athena-chat-bg'); if(savedBg) applyChatBg(savedBg); else renderBgPreview(); }catch(e){ renderBgPreview(); }
 
 // ---------- Personas ----------
 // Built-in reply styles: General (today's behaviour, no extra
@@ -9544,11 +9544,11 @@ try{ const savedBg=localStorage.getItem('mawaxi-chat-bg'); if(savedBg) applyChat
 // with every chat/agent request as `persona` and persists in localStorage.
 const PERSONAS={general:'General',medical:'Medical Lab Expert',teacher:'Teacher',coder:'Coder'};
 let currentPersona='general';
-try{ const p=localStorage.getItem('mawaxi-persona'); if(p && PERSONAS[p]) currentPersona=p; }catch(e){}
+try{ const p=localStorage.getItem('athena-persona'); if(p && PERSONAS[p]) currentPersona=p; }catch(e){}
 function applyPersona(id){
   if(!PERSONAS[id]) return;
   currentPersona=id;
-  try{ localStorage.setItem('mawaxi-persona',id); }catch(e){}
+  try{ localStorage.setItem('athena-persona',id); }catch(e){}
   if(personaSel) personaSel.value=id;
   if(personaBtnLabel) personaBtnLabel.textContent=PERSONAS[id];
 }
@@ -9559,10 +9559,10 @@ if(personaSel){ personaSel.value=currentPersona; personaSel.addEventListener('ch
 // When on: images generate at 512px, images/videos only load when tapped,
 // and free video uses a smaller still. Persists in localStorage.
 let dataSaver=false;
-try{ dataSaver=localStorage.getItem('mawaxi-data-saver')==='1'; }catch(e){}
+try{ dataSaver=localStorage.getItem('athena-data-saver')==='1'; }catch(e){}
 function setDataSaver(on){
   dataSaver=!!on;
-  try{ localStorage.setItem('mawaxi-data-saver', dataSaver?'1':'0'); }catch(e){}
+  try{ localStorage.setItem('athena-data-saver', dataSaver?'1':'0'); }catch(e){}
   if(dsToggle) dsToggle.textContent=dataSaver?'Turn Data Saver off':'Turn Data Saver on';
   if(dsMsg) dsMsg.textContent=dataSaver?'Data Saver is ON — images 512px, tap to load media.':'Data Saver is off — media loads straight away.';
 }
@@ -9582,7 +9582,7 @@ function tapToLoadBox(label, loadFn){
 if(dsToggle) dsToggle.addEventListener('click', function(){ setDataSaver(!dataSaver); showToast(dataSaver?'Data Saver on':'Data Saver off'); });
 setDataSaver(dataSaver);
 let pendingImage=null; let pendingPdf=null; let recActive=null;
-let mode='chat'; try{ const sm=localStorage.getItem('mawaxi-mode'); if(sm==='agent'||sm==='chat') mode=sm; }catch(e){} let currentRunId=null; let agentRunning=false; let agentReader=null; let chatBusy=false;
+let mode='chat'; try{ const sm=localStorage.getItem('athena-mode'); if(sm==='agent'||sm==='chat') mode=sm; }catch(e){} let currentRunId=null; let agentRunning=false; let agentReader=null; let chatBusy=false;
 
 function showToast(msg){
   toast.textContent=msg; toast.style.display='block';
@@ -9758,7 +9758,7 @@ skillChipX.addEventListener('click', function(){
 personaBtn.addEventListener('click', function(){ const ids=Object.keys(PERSONAS); const next=ids[(ids.indexOf(currentPersona)+1)%ids.length]; applyPersona(next); showToast('Persona: '+PERSONAS[currentPersona]); });
 function setMode(m){
   mode=m;
-  try{ localStorage.setItem('mawaxi-mode', m); }catch(e){}
+  try{ localStorage.setItem('athena-mode', m); }catch(e){}
   if(modeAgent) modeAgent.classList.toggle('active', m==='agent');
   if(modeChat) modeChat.classList.toggle('active', m==='chat');
   if(modeAgentW) modeAgentW.classList.toggle('active', m==='agent');
@@ -9958,7 +9958,7 @@ async function openResearchView(){
 // server-side research loop. Last-used choices persist in localStorage
 // and override these defaults.
 function rsLoadOpts(){
-  try{ return JSON.parse(localStorage.getItem('mawaxi-rs-opts')||'{}'); }catch(e){ return {}; }
+  try{ return JSON.parse(localStorage.getItem('athena-rs-opts')||'{}'); }catch(e){ return {}; }
 }
 function rsSaveOpts(){
   const o={};
@@ -9967,7 +9967,7 @@ function rsSaveOpts(){
   const r=document.getElementById('rsRounds'); if(r) o.rounds=r.value;
   const f=document.getElementById('rsFormat'); if(f) o.format=f.value;
   const e=document.getElementById('rsEngine'); if(e) o.engine=e.value;
-  try{ localStorage.setItem('mawaxi-rs-opts', JSON.stringify(o)); }catch(err){}
+  try{ localStorage.setItem('athena-rs-opts', JSON.stringify(o)); }catch(err){}
   return o;
 }
 async function buildResearchControls(){
@@ -10913,9 +10913,9 @@ async function openLibraryView(){
     return d;
   }
   // Library view + sort (persisted)
-  let libView=localStorage.getItem('mawaxi-lib-view')||'large';
-  let libSort=localStorage.getItem('mawaxi-lib-sort')||'name';
-  let libDir=localStorage.getItem('mawaxi-lib-dir')||'asc';
+  let libView=localStorage.getItem('athena-lib-view')||'large';
+  let libSort=localStorage.getItem('athena-lib-sort')||'name';
+  let libDir=localStorage.getItem('athena-lib-dir')||'asc';
   function libExt(it){ const m=(it.path||'').toLowerCase().match(/\.([a-z0-9]+)$/); return m?m[1]:''; }
   function libSortItems(arr){
     const d=libDir==='desc'?-1:1;
@@ -10966,15 +10966,15 @@ async function openLibraryView(){
   document.getElementById('libFileSearch').addEventListener('input', renderFiles);
   renderFiles();
   document.querySelectorAll('.libViewBtn[data-view]').forEach(function(b){
-    b.addEventListener('click', function(){ libView=b.getAttribute('data-view'); localStorage.setItem('mawaxi-lib-view', libView); applyLibView(); });
+    b.addEventListener('click', function(){ libView=b.getAttribute('data-view'); localStorage.setItem('athena-lib-view', libView); applyLibView(); });
   });
   document.getElementById('libSortSel').addEventListener('change', function(){
     libSort=this.value; libDir=(libSort==='date')?'desc':'asc';
-    localStorage.setItem('mawaxi-lib-sort', libSort); localStorage.setItem('mawaxi-lib-dir', libDir);
+    localStorage.setItem('athena-lib-sort', libSort); localStorage.setItem('athena-lib-dir', libDir);
     applyLibView(); renderFiles();
   });
   document.getElementById('libSortDir').addEventListener('click', function(){
-    libDir=libDir==='desc'?'asc':'desc'; localStorage.setItem('mawaxi-lib-dir', libDir);
+    libDir=libDir==='desc'?'asc':'desc'; localStorage.setItem('athena-lib-dir', libDir);
     applyLibView(); renderFiles();
   });
   applyLibView();
@@ -11061,8 +11061,8 @@ function openLightbox(imgSrc, caption){
 let browserTabs=[]; // {id,title,url,finalUrl,history,histIdx,mode,frameable,text,isHome}
 let browserActiveId=null;
 let browserTabSeq=0;
-const BROWSER_BM_KEY='mawaxi-browser-bookmarks';
-const BROWSER_HIST_KEY='mawaxi-browser-history';
+const BROWSER_BM_KEY='athena-browser-bookmarks';
+const BROWSER_HIST_KEY='athena-browser-history';
 function browserLoadBookmarks(){ try{ const v=JSON.parse(localStorage.getItem(BROWSER_BM_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
 function browserSaveBookmarks(list){ try{ localStorage.setItem(BROWSER_BM_KEY, JSON.stringify(list)); }catch(e){} }
 function browserLoadHistory(){ try{ const v=JSON.parse(localStorage.getItem(BROWSER_HIST_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
@@ -11226,7 +11226,7 @@ function browserRenderHome(tab){
 }
 function openCloudPCView(){
   openFeature('Cloud PC');
-  let saved={}; try{ saved=JSON.parse(localStorage.getItem('mawaxi-cloudpc')||'{}'); }catch(e){ saved={}; }
+  let saved={}; try{ saved=JSON.parse(localStorage.getItem('athena-cloudpc')||'{}'); }catch(e){ saved={}; }
   fvBody.innerHTML='<p class="hint">A free Windows 11 cloud PC (16GB RAM, 200GB storage) using GitHub Actions + Tailscale. Each run lasts up to about 6 hours — run the workflow again for a fresh one.</p>'
     +'<div class="fv-sec">Setup — do once</div>'
     +'<p>1. Create a GitHub repo (any name). In the repo go to Settings &gt; Secrets &gt; Actions and add two secrets:<br><b>TAILSCALE_AUTHKEY</b> — from tailscale.com/admin/settings/keys (create an Auth key, reusable).<br><b>RDP_PASSWORD</b> — choose a strong password for the RDP user.</p>'
@@ -11242,11 +11242,11 @@ function openCloudPCView(){
     +'<p id="cpcMsg" class="hint"></p>';
   document.getElementById('cpcSave').addEventListener('click', function(){
     const d={ ip:document.getElementById('cpcIp').value.trim(), user:document.getElementById('cpcUser').value.trim()||'RDP', pass:document.getElementById('cpcPass').value };
-    try{ localStorage.setItem('mawaxi-cloudpc', JSON.stringify(d)); }catch(e){}
+    try{ localStorage.setItem('athena-cloudpc', JSON.stringify(d)); }catch(e){}
     document.getElementById('cpcMsg').textContent='Saved. Connect with Remote Desktop to '+d.ip+' as '+d.user+'.';
   });
   document.getElementById('cpcClear').addEventListener('click', function(){
-    try{ localStorage.removeItem('mawaxi-cloudpc'); }catch(e){}
+    try{ localStorage.removeItem('athena-cloudpc'); }catch(e){}
     document.getElementById('cpcIp').value=''; document.getElementById('cpcUser').value='RDP'; document.getElementById('cpcPass').value='';
     document.getElementById('cpcMsg').textContent='Cleared.';
   });
@@ -11962,13 +11962,13 @@ async function refreshModelSelect(){
     if(found){ modelSel.value=pv; currentModel=activePuterModel; return; }
     // Clear inline (do NOT call setActivePuter here: it would re-enter refreshModelSelect).
     activePuterModel='';
-    try{ localStorage.removeItem('mawaxi_active_puter'); }catch(e){}
+    try{ localStorage.removeItem('athena_active_puter'); }catch(e){}
   }
   if(activeEndpointId){
     const ep=endpoints.find(function(e){return e.id===activeEndpointId;});
     if(ep){ modelSel.value='endpoint:'+ep.id+':'+ep.model; currentModel=ep.model; return; }
     activeEndpointId='';
-    try{ localStorage.removeItem('mawaxi_active_endpoint'); }catch(e){}
+    try{ localStorage.removeItem('athena_active_endpoint'); }catch(e){}
   }
   if(ollamaModels.indexOf(currentModel)>=0){ modelSel.value=currentModel; }
   else{ currentModel=ollamaModels[0]; modelSel.value=currentModel; }
@@ -11976,8 +11976,8 @@ async function refreshModelSelect(){
 function setActiveEndpoint(id){
   activeEndpointId=id||'';
   try{
-    if(activeEndpointId) localStorage.setItem('mawaxi_active_endpoint', activeEndpointId);
-    else localStorage.removeItem('mawaxi_active_endpoint');
+    if(activeEndpointId) localStorage.setItem('athena_active_endpoint', activeEndpointId);
+    else localStorage.removeItem('athena_active_endpoint');
   }catch(e){}
   renderEpList(); refreshModelSelect();
 }
@@ -12107,7 +12107,7 @@ function renderEpList(){
       await fetch('/api/endpoints/'+encodeURIComponent(ep.id), {method:'DELETE'});
       if(activeEndpointId===ep.id){
         activeEndpointId='';
-        try{ localStorage.removeItem('mawaxi_active_endpoint'); }catch(e){}
+        try{ localStorage.removeItem('athena_active_endpoint'); }catch(e){}
       }
       await loadEndpoints();
     });
