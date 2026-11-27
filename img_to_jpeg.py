@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert any image on stdin to JPEG on stdout.
 
-Used by the Mawaxi AI PDF writer (src/main.rs) so chat PDFs can embed
+Used by the Athena AI PDF writer (src/main.rs) so chat PDFs can embed
 photos that are not already JPEG (PNG, GIF, CMYK JPEG, oversized JPEG).
 Reads raw image bytes from stdin, writes JPEG bytes to stdout.
 Exits non-zero with a message on stderr when the input cannot be read.

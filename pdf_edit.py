@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Format-preserving PDF text editing for Mawaxi AI (uses PyMuPDF / fitz).
+"""Format-preserving PDF text editing for Athena AI (uses PyMuPDF / fitz).
 
 The old editor extracted plain text and re-set it in a brand-new PDF, so
 every trace of the original layout was lost. This helper edits the ORIGINAL

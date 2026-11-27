@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add Puter (puter.js) free higher-end models to Mawaxi AI (chat mode, browser-side).
+"""Add Puter (puter.js) free higher-end models to Athena AI (chat mode, browser-side).
 Run on the phone inside /root/odysseus-rust. Backs up src/main.rs first is done by caller.
 Each replacement must match exactly once, else the script aborts loudly.
 """
@@ -19,18 +19,18 @@ orig_len = len(s)
 
 # 1. Load puter.js in the page head.
 s = rep(s,
-'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mawaxi AI</title>',
-'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mawaxi AI</title>\n<script src="https://js.puter.com/v2/"></script>',
+'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Athena AI</title>',
+'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Athena AI</title>\n<script src="https://js.puter.com/v2/"></script>',
 "head-puter-script")
 
 # 2. Declare activePuterModel + PUTER_MODELS + helpers next to activeEndpointId.
 s = rep(s,
 """let activeEndpointId='';
-try{ activeEndpointId=localStorage.getItem('mawaxi_active_endpoint')||''; }catch(e){}""",
+try{ activeEndpointId=localStorage.getItem('athena_active_endpoint')||''; }catch(e){}""",
 """let activeEndpointId='';
-try{ activeEndpointId=localStorage.getItem('mawaxi_active_endpoint')||''; }catch(e){}
+try{ activeEndpointId=localStorage.getItem('athena_active_endpoint')||''; }catch(e){}
 let activePuterModel='';
-try{ activePuterModel=localStorage.getItem('mawaxi_active_puter')||''; }catch(e){}
+try{ activePuterModel=localStorage.getItem('athena_active_puter')||''; }catch(e){}
 // Puter (puter.js) free higher-end models, shown as a "Puter" group in the model picker.
 // The browser calls puter.ai.chat() directly; the server never sees a Puter token.
 const PUTER_MODELS=[
@@ -50,8 +50,8 @@ function puterReady(){ return (typeof window.puter!=='undefined' && window.puter
 function setActivePuter(mid){
   activePuterModel=mid||'';
   try{
-    if(activePuterModel) localStorage.setItem('mawaxi_active_puter', activePuterModel);
-    else localStorage.removeItem('mawaxi_active_puter');
+    if(activePuterModel) localStorage.setItem('athena_active_puter', activePuterModel);
+    else localStorage.removeItem('athena_active_puter');
   }catch(e){}
   refreshModelSelect();
 }""",
@@ -119,7 +119,7 @@ s = rep(s,
     if(found){ modelSel.value=pv; currentModel=activePuterModel; return; }
     // Clear inline (do NOT call setActivePuter here: it would re-enter refreshModelSelect).
     activePuterModel='';
-    try{ localStorage.removeItem('mawaxi_active_puter'); }catch(e){}
+    try{ localStorage.removeItem('athena_active_puter'); }catch(e){}
   }
   if(activeEndpointId){
     const ep=endpoints.find(function(e){return e.id===activeEndpointId;});""",
